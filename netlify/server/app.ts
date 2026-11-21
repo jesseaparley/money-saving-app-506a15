@@ -11,6 +11,7 @@ import {
   deposits,
 } from "../../db/schema.ts";
 import { quests } from "../../shared/quests.ts";
+import { dailyBonus } from "../../shared/challenges.ts";
 
 const app = new Hono<{ Variables: { profileId: string; today: string } }>();
 const MAX_CENTS = 100_000_000;
@@ -157,7 +158,7 @@ app.post("/api/quests/:id/complete", async (c) => {
       .set({
         status: "completed",
         savingsCents: saved,
-        xp: quest.xp,
+        xp: quest.xp + dailyBonus(quest.id, today),
         goalId,
         completedAt: new Date(),
         localDate: today,

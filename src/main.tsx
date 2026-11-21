@@ -33,7 +33,16 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { quests, levelNames, XP_PER_LEVEL } from "../shared/quests";
+import {
+  DAILY_BONUS_XP,
+  WEEKLY_TARGET_CENTS,
+  dailyBonus,
+  dailyChallenges,
+  weekStart,
+} from "../shared/challenges";
+import { Achievements } from "./achievements";
 import "./styles.css";
+import "./game.css";
 
 type Quest = (typeof quests)[number];
 type Page = "overview" | "quests" | "goals" | "history";
@@ -382,11 +391,13 @@ function GoalCard({
 function QuestCard({
   quest,
   index,
+  bonus,
   run,
   onOpen,
 }: {
   quest: Quest;
   index: number;
+  bonus: number;
   run?: Run;
   onOpen: (quest: Quest) => void;
 }) {
@@ -426,7 +437,7 @@ function QuestCard({
         <div className="quest-rewards">
           <span>
             <Zap size={14} fill="currentColor" />
-            {quest.xp} XP
+            {done ? run.xp : quest.xp + bonus} XP
           </span>
           <span className="reward-separator" />
           <span className="save-estimate">
@@ -577,6 +588,7 @@ function App() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState("");
+  const [celebration, setCelebration] = useState("");
   const [modal, setModal] = useState<Modal>(null);
   const [modalError, setModalError] = useState("");
   const [category, setCategory] = useState("All quests");
@@ -609,6 +621,11 @@ function App() {
     const timer = window.setTimeout(() => setToast(""), 4500);
     return () => clearTimeout(timer);
   }, [toast]);
+  useEffect(() => {
+    if (!celebration) return;
+    const timer = window.setTimeout(() => setCelebration(""), 1500);
+    return () => clearTimeout(timer);
+  }, [celebration]);
   useEffect(() => {
     function refreshDay() {
       if (
@@ -650,6 +667,7 @@ function App() {
     body: object,
     message: string,
     close = false,
+    completingQuest?: Quest,
   ) {
     if (busy) return false;
     setBusy(true);
@@ -659,7 +677,25 @@ function App() {
       const result = await api(path, { ...body, requestId: requestId.current });
       setData(result);
       setConnected(true);
-      setToast(message);
+      if (completingQuest) {
+        const run = result.runs.find((entry) =>
+          entry.questId === completingQuest.id &&
+          entry.period === (completingQuest.repeat ? result.today : "once") &&
+          entry.status === "completed",
+        );
+        if (run) {
+          const bonus = run.xp - completingQuest.xp;
+          setToast(bonus > 0
+            ? `Challenge complete! +${run.xp} XP, including ${bonus} bonus XP.`
+            : `Quest complete! +${run.xp} XP.`);
+          if (!data.runs.some((entry) => entry.id === run.id && entry.status === "completed"))
+            setCelebration(run.id);
+        } else {
+          setToast(message);
+        }
+      } else {
+        setToast(message);
+      }
       if (close) setModal(null);
       return true;
     } catch (e) {
@@ -697,6 +733,21 @@ function App() {
   const isDone = (quest: Quest) => runFor(quest)?.status === "completed";
   const active = quests.filter((q) => runFor(q)?.status === "active").length;
   const currentDone = quests.filter(isDone).length;
+  const daily = dailyChallenges(data.today);
+  const monday = weekStart(data.today);
+  const depositDay = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const isThisWeek = (date: string) => date >= monday && date <= data.today;
+  const weeklySaved = completed.reduce((sum, run) =>
+    sum + (isThisWeek(run.localDate) ? run.savingsCents : 0), 0) +
+    data.deposits.reduce((sum, deposit) =>
+      sum + (isThisWeek(depositDay.format(new Date(deposit.createdAt))) ? deposit.amountCents : 0), 0);
+  const baseXp = new Map<string, number>(quests.map((quest) => [quest.id, quest.xp]));
+  const earnedDailyBonus = completed.some((run) => run.xp > (baseXp.get(run.questId) ?? Infinity));
   const featuredGoal =
     data.goals.find((g) => g.savedCents < g.targetCents) || data.goals[0];
   const filteredQuests = quests.filter(
@@ -1040,6 +1091,56 @@ function App() {
           />
         </section>
 
+        {page === "overview" && connected && (
+          <div className="game-grid">
+            <section className="daily-challenges" aria-labelledby="daily-title">
+              <div className="game-heading">
+                <div>
+                  <h2 id="daily-title">Daily challenges</h2>
+                  <p>Rotates at midnight · +{DAILY_BONUS_XP} bonus XP each</p>
+                </div>
+                <span>{daily.filter(isDone).length} / {daily.length} complete</span>
+              </div>
+              <ul className="daily-list">
+                {daily.map((quest) => {
+                  const Icon = questIcons[quest.icon];
+                  const run = runFor(quest);
+                  const done = run?.status === "completed";
+                  return (
+                    <li key={quest.id}>
+                      <button onClick={() => open({ type: "quest", quest })}>
+                        <span className={`daily-icon ${quest.color}`}><Icon size={19} aria-hidden="true" /></span>
+                        <span className="daily-label">
+                          <strong>{quest.title}</strong>
+                          <small>{done ? "Completed" : run ? "Continue challenge" : "Start challenge"}</small>
+                        </span>
+                        <span className="daily-reward">
+                          {done ? <Check size={15} aria-hidden="true" /> : <Zap size={14} aria-hidden="true" />}
+                          {done ? run.xp : quest.xp + DAILY_BONUS_XP} XP
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+            <section className="weekly-mission" aria-labelledby="weekly-title">
+              <div className="weekly-icon"><Flag size={22} aria-hidden="true" /></div>
+              <h2 id="weekly-title">Weekly savings mission</h2>
+              <p>Quest savings and goal deposits count. Resets Mondays.</p>
+              <div className="weekly-amount">
+                <strong>{money(weeklySaved, true)}</strong> / {money(WEEKLY_TARGET_CENTS)}
+              </div>
+              <progress aria-label="Weekly savings mission progress" value={Math.min(weeklySaved, WEEKLY_TARGET_CENTS)} max={WEEKLY_TARGET_CENTS} />
+              <p className="weekly-status">
+                {weeklySaved >= WEEKLY_TARGET_CENTS
+                  ? "Mission complete!"
+                  : `${money(WEEKLY_TARGET_CENTS - weeklySaved, true)} to go`}
+              </p>
+            </section>
+          </div>
+        )}
+
         {page === "overview" && (
           <div className="dashboard-layout">
             <div className="main-column">
@@ -1111,6 +1212,7 @@ function App() {
                     <QuestCard
                       quest={q}
                       index={i}
+                      bonus={dailyBonus(q.id, data.today)}
                       key={q.id}
                       run={runFor(q)}
                       onOpen={(quest) => open({ type: "quest", quest })}
@@ -1130,6 +1232,15 @@ function App() {
               </div>
             </div>
             <aside className="sidebar">
+              {connected && (
+                <Achievements
+                  completedCount={completed.length}
+                  dates={dates}
+                  savings={totalSaved}
+                  reachedGoal={data.goals.some((goal) => goal.savedCents >= goal.targetCents)}
+                  earnedDailyBonus={earnedDailyBonus}
+                />
+              )}
               <LevelCard
                 level={level}
                 levelName={levelName}
@@ -1250,6 +1361,7 @@ function App() {
                 <QuestCard
                   quest={q}
                   index={i}
+                  bonus={dailyBonus(q.id, data.today)}
                   key={q.id}
                   run={runFor(q)}
                   onOpen={(quest) => open({ type: "quest", quest })}
@@ -1441,6 +1553,14 @@ function App() {
           </div>
         </footer>
       </main>
+      {celebration && (
+        <div className="quest-celebration" key={celebration} aria-hidden="true">
+          <span className="celebration-medal"><Trophy size={42} /></span>
+          {Array.from({ length: 16 }, (_, index) => (
+            <i key={index} style={{ "--angle": `${index * 22.5}deg` } as React.CSSProperties} />
+          ))}
+        </div>
+      )}
       {toast && (
         <div className="toast" role="status">
           <span>
@@ -1486,6 +1606,7 @@ function App() {
                 run = runFor(q),
                 done = run?.status === "completed",
                 Icon = questIcons[q.icon];
+              const bonus = dailyBonus(q.id, data.today);
               return (
                 <>
                   <div className="quest-dialog-meta">
@@ -1493,7 +1614,7 @@ function App() {
                       <Icon size={23} />
                     </span>
                     <span>
-                      <Zap size={14} /> {q.xp} XP
+                      <Zap size={14} /> {done ? run.xp : q.xp + bonus} XP
                     </span>
                     <span>
                       <Clock3 size={14} /> {q.duration}
@@ -1501,6 +1622,7 @@ function App() {
                     <span>{q.repeat ? "Daily quest" : "One-time quest"}</span>
                   </div>
                   <p className="modal-description">{q.description}</p>
+                  {!done && bonus > 0 && <p className="daily-bonus-note">Includes +{bonus} daily challenge XP.</p>}
                   <ol className="quest-steps">
                     {q.steps.map((step, i) => (
                       <li key={step}>
@@ -1565,8 +1687,9 @@ function App() {
                             savingsCents: savings,
                             goalId: f.get("goalId") || null,
                           },
-                          `Quest complete! +${q.xp} XP. That’s a win for future you.`,
+                          "Quest complete!",
                           true,
+                          q,
                         );
                       }}
                     >
@@ -1619,7 +1742,7 @@ function App() {
                         ) : (
                           <CheckCheck size={17} />
                         )}{" "}
-                        Complete quest · +{q.xp} XP
+                        Complete quest · +{q.xp + bonus} XP
                       </button>
                     </form>
                   )}

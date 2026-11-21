@@ -1,6 +1,6 @@
 # MoneyQuest
 
-MoneyQuest is a gamified savings prototype built around small, practical money habits. It includes eight challenges, XP and levels, daily check-ins and streaks, personal savings goals, completed quest history, and a downloadable CSV of progress.
+MoneyQuest is a gamified savings prototype built around small, practical money habits. It includes eight quests, rotating daily challenges, a weekly savings mission, achievements, XP and levels, daily check-ins and streaks, personal savings goals, completed quest history, and a downloadable CSV of progress.
 
 The responsive interface uses React 19, TypeScript, Vite, Lucide icons, and custom CSS. A Hono application runs on Netlify Server. Netlify Database and Drizzle ORM persist the progress.
 
@@ -17,6 +17,8 @@ Open the local address printed by the CLI. Use the Netlify development environme
 ## How progress works
 
 All visitors begin with zero savings and XP. Each 300 XP advances a level. A daily check-in earns 10 XP once per local calendar day; finishing a quest also performs that day's check-in. The four daily quests can be repeated on subsequent days. The other four can be completed once. Completion amounts are self-reported; the suggested savings are estimates.
+
+Each day, three repeatable quests are featured as daily challenges. Completing a featured quest earns 25 bonus XP through the same quest run. The weekly mission counts logged quest savings and independent goal deposits toward $25 and starts fresh each Monday. Six achievement badges unlock automatically as you reach milestones, including milestones already recorded in your history.
 
 Create a goal with a target and optional existing savings. Completing a quest can allocate that quest's savings to a goal. Additional goal deposits record new money set aside. Total savings counts completed quest savings and independent deposits once, even when quest savings are allocated to a goal.
 
