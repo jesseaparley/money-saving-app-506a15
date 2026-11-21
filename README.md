@@ -31,3 +31,11 @@ Progress is stored in Netlify Database. An opaque, HTTP-only browser cookie link
 ## Schema changes
 
 Update `db/schema.ts` and generate a migration with `npx drizzle-kit generate --name describe_your_change`. Keep migrations in `netlify/database/migrations`. Netlify applies them at deploy time; do not apply migrations manually.
+
+## Version 2.1 privacy and feedback
+
+The welcome dialog appears on the first visit with no saved progress. Closing it or exploring quests remembers the choice in that browser. Returning visitors can open **How it works** for a refresher.
+
+Usage analytics are off by default and can be changed in **Privacy settings**. MoneyQuest honors Global Privacy Control and stores only UTC daily counts of opted-in visits and newly completed quests in `analytics_daily`. A tab session attempts to record at most one visit. Analytics contain no profile IDs, IP addresses, savings amounts, goals, or individual quest IDs. Quest completion analytics are best effort and never change progress. These counts measure opted-in activity, not unique users.
+
+The in-app feedback form stores up to 1,000 characters per submission in `feedback`, with a submission ID and time. It does not attach the visitor’s profile or financial records. Authorized maintainers can review these two tables in the Netlify database. **Share app** shares the public MoneyQuest URL through the device’s share sheet or a copyable link.

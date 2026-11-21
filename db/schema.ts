@@ -80,3 +80,19 @@ export const deposits = pgTable("deposits", {
     .notNull()
     .defaultNow(),
 });
+
+export const analyticsDaily = pgTable(
+  "analytics_daily",
+  {
+    day: text("day").notNull(),
+    metric: text("metric", { enum: ["visit", "quest_completion"] }).notNull(),
+    count: integer("count").notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.day, table.metric] })],
+);
+
+export const feedback = pgTable("feedback", {
+  id: text("id").primaryKey(),
+  message: text("message").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
