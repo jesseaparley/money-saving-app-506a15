@@ -15,6 +15,7 @@ import {
 } from "../../db/schema.ts";
 import { quests } from "../../shared/quests.ts";
 import { dailyBonus } from "../../shared/challenges.ts";
+import owner from "./owner.ts";
 
 const app = new Hono<{ Variables: { profileId: string; today: string } }>();
 const MAX_CENTS = 100_000_000;
@@ -51,6 +52,8 @@ app.use("/api/*", async (c, next) => {
   if (length > 8192) return c.json({ error: "Request is too large." }, 413);
   await next();
 });
+
+app.route("/api/owner", owner);
 
 async function recordMetric(metric: (typeof analyticsDaily.$inferInsert)["metric"]) {
   const day = new Date().toISOString().slice(0, 10);
