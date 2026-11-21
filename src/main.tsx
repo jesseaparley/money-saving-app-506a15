@@ -19,6 +19,8 @@ import {
   ReceiptText,
   Search,
   ShieldCheck,
+  Share2,
+  MessageSquare,
   Sparkles,
   Sprout,
   Target,
@@ -43,6 +45,19 @@ import {
 import { Achievements } from "./achievements";
 import "./styles.css";
 import "./game.css";
+import "./welcome.css";
+import {
+  AnalyticsChoice,
+  WelcomeSteps,
+  SHARE_URL,
+  analyticsAllowed,
+  analyticsHeader,
+  analyticsPreference,
+  hasSeenWelcome,
+  recordVisit,
+  rememberWelcome,
+  saveAnalyticsPreference,
+} from "./welcome";
 
 type Quest = (typeof quests)[number];
 type Page = "overview" | "quests" | "goals" | "history";
@@ -81,7 +96,7 @@ type Modal =
   | { type: "quest"; quest: Quest }
   | { type: "goal" }
   | { type: "deposit"; goal: Goal }
-  | { type: "help" }
+  | { type: "help" | "welcome" | "feedback" | "privacy" | "share" }
   | null;
 const questIcons: Record<string, LucideIcon> = {
   coffee: Coffee,
@@ -123,13 +138,17 @@ const siteName = "MoneyQuest";
 const siteDescription =
   "Make saving a little more rewarding. Take on everyday money quests, earn XP, build a streak, and bring your personal savings goals closer.";
 
-async function api(path: string, body?: object): Promise<Progress> {
+async function api(path: string, body?: object, analytics = false): Promise<Progress> {
   let response: Response;
   try {
     response = await fetch(`/api${path}`, {
       method: body ? "POST" : "GET",
       credentials: "same-origin",
-      headers: { "Content-Type": "application/json", "X-Time-Zone": timeZone },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Time-Zone": timeZone,
+        ...(analytics ? { [analyticsHeader]: "1" } : {}),
+      },
       signal: AbortSignal.timeout(20000),
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
@@ -591,6 +610,9 @@ function App() {
   const [celebration, setCelebration] = useState("");
   const [modal, setModal] = useState<Modal>(null);
   const [modalError, setModalError] = useState("");
+  const [analyticsEnabled, setAnalyticsEnabled] = useState(analyticsPreference);
+  const [welcomeHandled, setWelcomeHandled] = useState(hasSeenWelcome);
+  const visitAttempted = useRef(false);
   const [category, setCategory] = useState("All quests");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
@@ -616,6 +638,20 @@ function App() {
       ?.setAttribute("content", siteDescription);
     void load();
   }, []);
+  useEffect(() => {
+    if (!connected || loading || welcomeHandled || modal) return;
+    if (data.goals.length || data.runs.length || data.checkIns.length || data.deposits.length) {
+      rememberWelcome();
+      setWelcomeHandled(true);
+      return;
+    }
+    setModal({ type: "welcome" });
+  }, [connected, loading, welcomeHandled, modal, data]);
+  useEffect(() => {
+    if (!connected || !analyticsEnabled || !analyticsAllowed() || visitAttempted.current) return;
+    visitAttempted.current = true;
+    recordVisit();
+  }, [connected, analyticsEnabled]);
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(""), 4500);
@@ -662,6 +698,60 @@ function App() {
     setModalError("");
     setModal(next);
   }
+  function updateAnalytics(enabled: boolean) {
+    saveAnalyticsPreference(enabled);
+    setAnalyticsEnabled(enabled);
+  }
+  function closeModal() {
+    if (busy) return;
+    if (modal?.type === "welcome") {
+      rememberWelcome();
+      setWelcomeHandled(true);
+    }
+    setModal(null);
+  }
+  async function shareApp() {
+    if (typeof navigator.share === "function") {
+      try {
+        await navigator.share({ title: siteName, url: SHARE_URL });
+        return;
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") return;
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(SHARE_URL);
+      setToast("MoneyQuest link copied.");
+    } catch {
+      open({ type: "share" });
+    }
+  }
+  async function sendFeedback(message: string) {
+    setBusy(true);
+    setModalError("");
+    try {
+      const response = await fetch("/api/feedback", {
+        method: "POST",
+        credentials: "omit",
+        referrerPolicy: "no-referrer",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, requestId: requestId.current }),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => null);
+        throw new Error(result?.error || "Feedback could not be sent. Please try again.");
+      }
+      setModal(null);
+      setToast("Thanks for sharing your feedback.");
+    } catch (e) {
+      setModalError(e instanceof Error && e.name === "Error"
+        ? e.message
+        : "Feedback could not be sent. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
   async function mutate(
     path: string,
     body: object,
@@ -674,7 +764,11 @@ function App() {
     setModalError("");
     setError("");
     try {
-      const result = await api(path, { ...body, requestId: requestId.current });
+      const result = await api(
+        path,
+        { ...body, requestId: requestId.current },
+        Boolean(completingQuest && analyticsEnabled && analyticsAllowed()),
+      );
       setData(result);
       setConnected(true);
       if (completingQuest) {
@@ -1544,9 +1638,14 @@ function App() {
           <span>
             <Sprout size={15} /> A little more mindful. A little more saved.
           </span>
-          <div>
-            <span>Made for your everyday wins</span>
-            <span className="footer-dot" />
+          <div className="footer-actions">
+            <button onClick={() => void shareApp()}>
+              <Share2 size={14} aria-hidden="true" /> Share app
+            </button>
+            <button onClick={() => open({ type: "feedback" })}>
+              <MessageSquare size={14} aria-hidden="true" /> Feedback
+            </button>
+            <button onClick={() => open({ type: "privacy" })}>Privacy settings</button>
             <button onClick={() => open({ type: "help" })}>
               How it works <CircleHelp size={13} />
             </button>
@@ -1585,7 +1684,13 @@ function App() {
                 ? "What are you saving for?"
                 : modal.type === "deposit"
                   ? "A little closer to your goal."
-                  : "Small steps. Real rewards."
+                  : {
+                      help: "Small steps. Real rewards.",
+                      welcome: "Welcome to MoneyQuest",
+                      feedback: "Send feedback",
+                      privacy: "Privacy settings",
+                      share: "Share MoneyQuest",
+                    }[modal.type]
           }
           label={
             modal.type === "quest"
@@ -1594,12 +1699,55 @@ function App() {
                 ? "GIVE YOUR SAVINGS A PURPOSE"
                 : modal.type === "deposit"
                   ? modal.goal.title
-                  : "WELCOME TO MONEYQUEST"
+                  : undefined
           }
-          onClose={() => {
-            if (!busy) setModal(null);
-          }}
+          onClose={closeModal}
         >
+          {modal.type === "welcome" && (
+            <>
+              <WelcomeSteps />
+              <AnalyticsChoice enabled={analyticsEnabled} onChange={updateAnalytics} />
+              <button className="button primary full-width" onClick={() => {
+                closeModal();
+                navigate("quests");
+              }}>
+                Explore quests <ArrowRight size={16} aria-hidden="true" />
+              </button>
+              <button className="button full-width" onClick={closeModal}>Stay on overview</button>
+            </>
+          )}
+          {modal.type === "privacy" && (
+            <>
+              <p className="modal-description">
+                A browser cookie keeps your savings progress connected to this device. Usage analytics are optional, and you can change your choice here anytime.
+              </p>
+              <AnalyticsChoice enabled={analyticsEnabled} onChange={updateAnalytics} />
+              <button className="button primary full-width" onClick={closeModal}>Done</button>
+            </>
+          )}
+          {modal.type === "feedback" && (
+            <form onSubmit={(event) => {
+              event.preventDefault();
+              if (!busy) void sendFeedback(String(new FormData(event.currentTarget).get("message") ?? ""));
+            }}>
+              <label htmlFor="feedback-message">What would you like us to know?</label>
+              <p className="field-hint" id="feedback-hint">
+                Up to 1,000 characters. Please leave out account details and other personal information.
+              </p>
+              <textarea id="feedback-message" name="message" rows={5} maxLength={1000}
+                aria-describedby="feedback-hint" required readOnly={busy} />
+              <button className="button primary full-width" type="submit" disabled={busy}>
+                {busy ? "Sending…" : "Send feedback"}
+              </button>
+            </form>
+          )}
+          {modal.type === "share" && (
+            <>
+              <p className="modal-description">Copy this link to invite someone to MoneyQuest.</p>
+              <label className="share-link-label" htmlFor="share-link">MoneyQuest link</label>
+              <input id="share-link" type="url" readOnly value={SHARE_URL} onFocus={(event) => event.currentTarget.select()} />
+            </>
+          )}
           {modal.type === "quest" &&
             (() => {
               const q = modal.quest,

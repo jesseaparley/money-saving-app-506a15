@@ -1,0 +1,86 @@
+.welcome-steps {
+  list-style: none;
+  margin: 16px 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 9px;
+}
+
+.welcome-steps li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  line-height: 1.4;
+  font-size: 14px;
+}
+
+.welcome-steps .icon-tile {
+  flex: 0 0 36px;
+  height: 36px;
+}
+
+.analytics-choice {
+  margin-block: 16px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #f3eff9;
+  color: #403153;
+}
+
+.modal .analytics-choice label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 36px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.analytics-choice input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #63399e;
+}
+
+.analytics-choice p {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.modal textarea,
+.modal input#share-link {
+  width: 100%;
+  border: 1px solid #bdb3c6;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-block: 8px 14px;
+  font: inherit;
+  font-size: 16px;
+  color: #403153;
+  background: #fff;
+}
+
+.modal textarea {
+  resize: vertical;
+}
+
+.modal textarea:focus-visible {
+  outline: 2px solid #63399e;
+  outline-offset: 2px;
+}
+
+.share-link-label {
+  display: block;
+  margin-top: 12px;
+}
+
+.site-footer .footer-actions {
+  flex-wrap: wrap;
+  gap: 0 12px;
+}
+
+.site-footer .footer-actions button {
+  min-height: 44px;
+  font-size: 12px;
+}

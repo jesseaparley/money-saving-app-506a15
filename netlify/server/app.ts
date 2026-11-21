@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { getCookie, setCookie } from "hono/cookie";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, eq, sql, desc } from "drizzle-orm";
@@ -9,6 +10,8 @@ import {
   questRuns,
   checkIns,
   deposits,
+  analyticsDaily,
+  feedback,
 } from "../../db/schema.ts";
 import { quests } from "../../shared/quests.ts";
 import { dailyBonus } from "../../shared/challenges.ts";
@@ -46,6 +49,43 @@ app.use("/api/*", async (c, next) => {
     return c.json({ error: "Please use MoneyQuest directly." }, 403);
   const length = Number(c.req.header("content-length") || 0);
   if (length > 8192) return c.json({ error: "Request is too large." }, 413);
+  await next();
+});
+
+async function recordMetric(metric: (typeof analyticsDaily.$inferInsert)["metric"]) {
+  const day = new Date().toISOString().slice(0, 10);
+  await db.insert(analyticsDaily).values({ day, metric, count: 1 }).onConflictDoUpdate({
+    target: [analyticsDaily.day, analyticsDaily.metric],
+    set: { count: sql`${analyticsDaily.count} + 1` },
+  });
+}
+
+app.post("/api/analytics/visit", async (c) => {
+  if (c.req.header("X-MoneyQuest-Analytics") !== "1" || c.req.header("Sec-GPC") === "1")
+    return c.body(null, 204);
+  await recordMetric("visit");
+  return c.body(null, 204);
+});
+
+app.post("/api/feedback", bodyLimit({
+  maxSize: 8192,
+  onError: (c) => c.json({ error: "Feedback is too long." }, 413),
+}), async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const message = typeof body?.message === "string" ? body.message.trim() : "";
+  if (!message || message.length > 1000)
+    return c.json({ error: "Enter feedback between 1 and 1,000 characters." }, 400);
+
+  const id = requestId(body.requestId);
+  try {
+    await db.insert(feedback).values({ id, message }).onConflictDoNothing();
+  } catch {
+    return c.json({ error: "Feedback could not be sent. Please try again." }, 503);
+  }
+  return c.body(null, 204);
+});
+
+app.use("/api/*", async (c, next) => {
   let token = getCookie(c, "mq_browser");
   if (!token || !/^[a-f0-9]{64}$/.test(token)) {
     token = randomBytes(32).toString("hex");
@@ -145,7 +185,7 @@ app.post("/api/quests/:id/complete", async (c) => {
     today = c.get("today");
   const goalId =
     typeof body.goalId === "string" && body.goalId ? body.goalId : null;
-  await db.transaction(async (tx) => {
+  const completed = await db.transaction(async (tx) => {
     if (goalId) {
       const [goal] = await tx
         .select()
@@ -183,7 +223,7 @@ app.post("/api/quests/:id/complete", async (c) => {
             eq(questRuns.period, quest.repeat ? today : "once"),
           ),
         );
-      if (existing?.status === "completed") return;
+      if (existing?.status === "completed") return false;
       throw new Error(
         "Start this quest first. If it is already complete, choose another quest.",
       );
@@ -197,7 +237,15 @@ app.post("/api/quests/:id/complete", async (c) => {
       .insert(checkIns)
       .values({ profileId, localDate: today })
       .onConflictDoNothing();
+    return true;
   });
+  if (completed && c.req.header("X-MoneyQuest-Analytics") === "1" && c.req.header("Sec-GPC") !== "1") {
+    try {
+      await recordMetric("quest_completion");
+    } catch {
+      console.warn("MoneyQuest could not record an aggregate quest completion.");
+    }
+  }
   return c.json(await state(profileId, today));
 });
 app.post("/api/goals", async (c) => {
