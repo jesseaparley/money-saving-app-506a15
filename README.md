@@ -46,11 +46,23 @@ Open `/api/owner` on the configured MoneyQuest site and sign in with the owner a
 
 Each CSV export uses the selected UTC date range. Feedback exports support up to 10,000 submissions at a time. If the range contains more, narrow the dates. Spreadsheet formula-like feedback is prefixed with an apostrophe in CSVs. Treat downloaded feedback as private because people may include personal details in their messages.
 
-After release approval, configure these Netlify runtime environment variables in the production deploy context and Functions scope:
+After release approval, verify that these entries from **Keys and secrets** are present in the deployed project’s **Project configuration → Environment variables**. Their scope must include **Functions** (or all scopes), with values for **Production** (or all contexts). Netlify Server reads them through `process.env` and picks up changes on a new deploy in that context. A production value does not apply to an Agent Deploy Preview unless its context is also configured. See [Netlify Server configuration](https://docs.netlify.com/build/server/configuration/#environment-variables).
 
-- `MONEYQUEST_OWNER_ORIGIN` is the exact HTTPS origin used to open the dashboard, such as `https://moneyquest.example`, without a trailing slash.
+- `MONEYQUEST_OWNER_ORIGIN` is the HTTPS origin used to open the dashboard, such as `https://moneyquest.example`. Use the domain you visit, with no path beyond an optional trailing slash.
 - `MONEYQUEST_OWNER_KEY` is a randomly generated 64-character lowercase hexadecimal key. Generate it privately with `openssl rand -hex 32` and store it in a password manager and Netlify's environment variable settings.
 
 The dashboard and its exports require that configuration and an owner session. Sessions expire after two hours. Sign-out clears the browser's session cookie. Rotate the access key to invalidate all issued sessions. The dashboard uses read-only queries and requires no database migration.
+
+If `/api/owner` returns a generic 404, open it once on the intended domain and look for `MoneyQuest owner configuration` under **Cloud compute → Server → Logs** for that branch. Each failure code is logged at most once per server instance.
+
+| Log code | What to check |
+| --- | --- |
+| `key_missing`, `origin_missing` | Verify the variable is set for this project, deploy context and Functions scope. Check that the active deploy was created after the changes. |
+| `key_invalid` | The key must contain 64 hexadecimal characters. |
+| `origin_invalid` | Supply an HTTPS origin without a path, credentials, query, or fragment. |
+| `request_url_origin_mismatch` | The deployed server saw a different origin. Check for a custom domain, Netlify subdomain, preview URL, or proxy mismatch. |
+| `post_origin_mismatch` | The browser’s Origin header was missing or did not match when submitting the form. Open the dashboard directly at the configured HTTPS origin. |
+
+If no diagnostic appears, check that the active deploy includes this patch and that the logs are scoped to the branch and request time. See [Netlify Server logs](https://docs.netlify.com/build/server/logs/).
 
 Run the owner route security checks with `node --experimental-test-module-mocks test/owner.test.mjs`. The tests exercise the Hono routes with mocked database results.

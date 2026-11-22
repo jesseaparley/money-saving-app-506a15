@@ -52,6 +52,54 @@ function post(path, value, requestOrigin = origin) {
   });
 }
 
+test("configuration failures are distinguished in server logs and stay private", async (t) => {
+  const warn = t.mock.method(console, "warn", () => {});
+  const cases = [
+    { key: "", origin: "", reasons: ["key_missing", "origin_missing"] },
+    { key: "invalid-secret", origin: "https://private.example/path", reasons: ["key_invalid", "origin_invalid"] },
+    { key, origin: "https://private.example", reasons: ["request_url_origin_mismatch"] },
+  ];
+  const before = selections.mock.callCount();
+  try {
+    for (const config of cases) {
+      process.env.MONEYQUEST_OWNER_KEY = config.key;
+      process.env.MONEYQUEST_OWNER_ORIGIN = config.origin;
+      for (let i = 0; i < 2; i++) {
+        const response = await request("", {
+          headers: { "X-Forwarded-Host": "private.example", "X-Forwarded-Proto": "https" },
+        });
+        assert.equal(response.status, 404);
+        assert.deepEqual(await response.json(), { error: "Not found." });
+        assert.equal(response.headers.get("set-cookie"), null);
+        assert.match(response.headers.get("cache-control"), /no-store/);
+      }
+    }
+  } finally {
+    process.env.MONEYQUEST_OWNER_KEY = key;
+    process.env.MONEYQUEST_OWNER_ORIGIN = origin;
+  }
+  assert.deepEqual(warn.mock.calls.map(({ arguments: args }) => args),
+    cases.flatMap(({ reasons }) => reasons.map((reason) => [`MoneyQuest owner configuration: ${reason}`])));
+  assert.equal(selections.mock.callCount(), before);
+});
+
+test("equivalent HTTPS origins and hex key formatting work with sign-in", async () => {
+  process.env.MONEYQUEST_OWNER_KEY = ` ${key.toUpperCase()}\n`;
+  process.env.MONEYQUEST_OWNER_ORIGIN = " HTTPS://OWNER.EXAMPLE:443/ ";
+  try {
+    assert.equal((await request("")).status, 401);
+    assert.equal((await post("/login", key.toUpperCase())).status, 303);
+    for (const invalid of ["http://owner.example", origin + "?", origin + "#",
+      origin + "/other/..", "https://user@owner.example"]) {
+      process.env.MONEYQUEST_OWNER_ORIGIN = invalid;
+      assert.equal((await request("")).status, 404);
+    }
+  } finally {
+    process.env.MONEYQUEST_OWNER_KEY = key;
+    process.env.MONEYQUEST_OWNER_ORIGIN = origin;
+  }
+});
+
 test("owner routes fail closed and do not query the database before authentication", async () => {
   const before = selections.mock.callCount();
   assert.equal((await request("")).status, 401);
