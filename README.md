@@ -61,7 +61,7 @@ If `/api/owner` returns a generic 404, open it once on the intended domain and l
 | `key_invalid` | The key must contain 64 hexadecimal characters. |
 | `origin_invalid` | Supply an HTTPS origin without a path, credentials, query, or fragment. |
 | `request_url_origin_mismatch` | The deployed server saw a different origin. Check for a custom domain, Netlify subdomain, preview URL, or proxy mismatch. |
-| `post_origin_mismatch` | The browser’s Origin header was missing or did not match when submitting the form. Open the dashboard directly at the configured HTTPS origin. |
+| `post_origin_mismatch` | The form request reported a different origin or lacked a verifiable same-origin browser header. Open the dashboard directly at the configured HTTPS origin. |
 
 If no diagnostic appears, check that the active deploy includes this patch and that the logs are scoped to the branch and request time. See [Netlify Server logs](https://docs.netlify.com/build/server/logs/).
 

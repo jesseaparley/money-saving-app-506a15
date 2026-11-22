@@ -121,6 +121,63 @@ test("owner routes fail closed and do not query the database before authenticati
   assert.equal(selections.mock.callCount(), before);
 });
 
+test("owner form verifies matching Origin or a same-origin browser fallback", async () => {
+  const signIn = await request("");
+  assert.equal(signIn.headers.get("referrer-policy"), "same-origin");
+  const verify = (headers, path = "/login") => request(path, {
+    method: "POST", headers, body: new URLSearchParams({ key }),
+  });
+
+  const accepted = [
+    { Origin: origin },
+    { Referer: origin + ownerPath },
+    { "Sec-Fetch-Site": "same-origin" },
+    { Origin: "null", "Sec-Fetch-Site": "same-origin" },
+    { Origin: "null", Referer: origin + ownerPath },
+  ];
+  for (const headers of accepted) {
+    const response = await verify(headers);
+    assert.equal(response.status, 303, JSON.stringify(headers));
+    assert.equal(response.headers.get("location"), ownerPath);
+    const cookie = response.headers.get("set-cookie");
+    assert.match(cookie, /; Max-Age=7200/i);
+    assert.match(cookie, /; Path=\/api\/owner/i);
+    assert.match(cookie, /; Secure/i);
+    assert.match(cookie, /; HttpOnly/i);
+    assert.match(cookie, /; SameSite=Strict/i);
+    assert.equal((await request("?start=2025-01-01&end=2025-01-02", {
+      headers: { Cookie: cookie.split(";")[0] },
+    })).status, 200);
+  }
+
+  const denied = [
+    {},
+    { Origin: "null" },
+    { Origin: "https://other.example", Referer: origin, "Sec-Fetch-Site": "same-origin" },
+    { Origin: "", Referer: origin },
+    { Origin: origin, "Sec-Fetch-Site": "same-site" },
+    { Origin: "null", Referer: origin, "Sec-Fetch-Site": "cross-site" },
+    { Referer: "https://other.example", "Sec-Fetch-Site": "same-origin" },
+    { Referer: "blob:" + origin + "/id" },
+    { "X-Forwarded-Host": "owner.example" },
+  ];
+  for (const headers of denied) {
+    const response = await verify(headers);
+    assert.equal(response.status, 403, JSON.stringify(headers));
+    assert.equal(response.headers.get("set-cookie"), null);
+  }
+
+  const login = await verify(accepted[1]);
+  const Cookie = login.headers.get("set-cookie").split(";")[0];
+  const rejectedLogout = await verify({ Cookie, Origin: "https://other.example" }, "/logout");
+  assert.equal(rejectedLogout.status, 403);
+  assert.equal(rejectedLogout.headers.get("set-cookie"), null);
+  const logout = await verify({ Cookie, Referer: origin + ownerPath }, "/logout");
+  assert.equal(logout.status, 303);
+  assert.match(logout.headers.get("set-cookie"), /Max-Age=0/);
+  assert.equal((await request("", { headers: { Cookie: logout.headers.get("set-cookie").split(";")[0] } })).status, 401);
+});
+
 test("owner session protects dashboard and CSV, and feedback renders as text", async () => {
   const login = await post("/login", key);
   assert.equal(login.status, 303);

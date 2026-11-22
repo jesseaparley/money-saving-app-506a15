@@ -26,11 +26,27 @@ const cookie = { httpOnly: true, secure: true, sameSite: "Strict", path: ownerPa
 const pageSize = 30;
 const exportLimit = 10_000;
 
+function isSameOriginPost(headers: Headers, expectedOrigin: string) {
+  const fetchSite = headers.get("Sec-Fetch-Site");
+  if (fetchSite !== null && fetchSite !== "same-origin") return false;
+
+  const origin = headers.get("Origin");
+  if (origin !== null && origin !== "null") return origin === expectedOrigin;
+
+  // HTML form navigations can omit or redact Origin. Require another
+  // browser-controlled same-origin signal before accepting the submission.
+  const referer = headers.get("Referer");
+  if (referer === null) return fetchSite === "same-origin";
+
+  const url = URL.parse(referer);
+  return url?.protocol === "https:" && url.origin === expectedOrigin;
+}
+
 owner.use("*", async (c, next) => {
   c.header("Cache-Control", "private, no-store");
   c.header("Netlify-CDN-Cache-Control", "no-store");
   c.header("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'");
-  c.header("Referrer-Policy", "no-referrer");
+  c.header("Referrer-Policy", "same-origin");
   c.header("X-Content-Type-Options", "nosniff");
   c.header("X-Robots-Tag", "noindex, nofollow");
 
@@ -43,7 +59,7 @@ owner.use("*", async (c, next) => {
     reportOnce("request_url_origin_mismatch");
     return c.json({ error: "Not found." }, 404);
   }
-  if (c.req.method === "POST" && c.req.header("Origin") !== config.origin) {
+  if (c.req.method === "POST" && !isSameOriginPost(c.req.raw.headers, config.origin)) {
     reportOnce("post_origin_mismatch");
     return c.json({ error: "Request origin could not be verified." }, 403);
   }
