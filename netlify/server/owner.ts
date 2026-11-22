@@ -10,7 +10,18 @@ import {
 } from "./owner-security.ts";
 import { dashboard, login } from "./owner-view.ts";
 
-const owner = new Hono();
+type OwnerConfig = NonNullable<ReturnType<typeof ownerConfig>["config"]>;
+
+const owner = new Hono<{ Variables: { ownerConfig: OwnerConfig } }>();
+type Diagnostic = NonNullable<ReturnType<typeof ownerConfig>["issues"]>[number] |
+  "request_url_origin_mismatch" | "post_origin_mismatch";
+const reported = new Set<Diagnostic>();
+
+function reportOnce(reason: Diagnostic) {
+  if (reported.has(reason)) return;
+  reported.add(reason);
+  console.warn(`MoneyQuest owner configuration: ${reason}`);
+}
 const cookie = { httpOnly: true, secure: true, sameSite: "Strict", path: ownerPath } as const;
 const pageSize = 30;
 const exportLimit = 10_000;
@@ -23,11 +34,20 @@ owner.use("*", async (c, next) => {
   c.header("X-Content-Type-Options", "nosniff");
   c.header("X-Robots-Tag", "noindex, nofollow");
 
-  const config = ownerConfig();
-  if (!config || new URL(c.req.url).origin !== config.origin)
+  const { config, issues } = ownerConfig();
+  if (!config) {
+    issues.forEach(reportOnce);
     return c.json({ error: "Not found." }, 404);
-  if (c.req.method === "POST" && c.req.header("Origin") !== config.origin)
+  }
+  if (new URL(c.req.url).origin !== config.origin) {
+    reportOnce("request_url_origin_mismatch");
+    return c.json({ error: "Not found." }, 404);
+  }
+  if (c.req.method === "POST" && c.req.header("Origin") !== config.origin) {
+    reportOnce("post_origin_mismatch");
     return c.json({ error: "Request origin could not be verified." }, 403);
+  }
+  c.set("ownerConfig", config);
 
   const { path, method } = c.req;
   if ((path === ownerPath + "/login" && method === "POST") ||
@@ -42,8 +62,8 @@ owner.use("*", async (c, next) => {
 owner.post("/login", bodyLimit({ maxSize: 1024 }), async (c) => {
   const body = await c.req.parseBody().catch(() => null);
   const key = body?.key;
-  const config = ownerConfig();
-  if (!config || typeof key !== "string" || !matchesKey(key, config.key))
+  const config = c.get("ownerConfig");
+  if (typeof key !== "string" || !matchesKey(key, config.key))
     return c.html(login("The access key was incorrect."), 401);
   setCookie(c, cookieName, newSession(config.key, config.origin), {
     ...cookie, maxAge: sessionSeconds,

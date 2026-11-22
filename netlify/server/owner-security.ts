@@ -4,17 +4,26 @@ export const ownerPath = "/api/owner";
 export const sessionSeconds = 2 * 60 * 60;
 export const cookieName = "__Secure-mq_owner";
 
+type ConfigIssue = "key_missing" | "key_invalid" | "origin_missing" | "origin_invalid";
+
 export function ownerConfig() {
-  const key = process.env.MONEYQUEST_OWNER_KEY ?? "";
-  const origin = process.env.MONEYQUEST_OWNER_ORIGIN ?? "";
-  if (!/^[a-f0-9]{64}$/.test(key)) return;
-  const url = URL.parse(origin);
-  if (!url || url.protocol !== "https:" || url.origin !== origin) return;
-  return { key, origin };
+  const key = process.env.MONEYQUEST_OWNER_KEY?.trim().toLowerCase() ?? "";
+  const origin = process.env.MONEYQUEST_OWNER_ORIGIN?.trim() ?? "";
+  const issues: ConfigIssue[] = [];
+  const url = /^https:\/\/[^/?#@\\\s]+\/?$/i.test(origin) ? URL.parse(origin) : null;
+
+  if (!key) issues.push("key_missing");
+  else if (!/^[a-f0-9]{64}$/.test(key)) issues.push("key_invalid");
+
+  if (!origin) issues.push("origin_missing");
+  else if (!url) issues.push("origin_invalid");
+
+  if (!url || issues.length) return { issues };
+  return { config: { key, origin: url.origin } };
 }
 
 export function matchesKey(value: string, key: string) {
-  return /^[a-f0-9]{64}$/.test(value) &&
+  return /^[a-f0-9]{64}$/i.test(value) &&
     timingSafeEqual(Buffer.from(value, "hex"), Buffer.from(key, "hex"));
 }
 
